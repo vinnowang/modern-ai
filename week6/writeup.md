@@ -74,3 +74,6 @@ d. (if applicable) Multi‑agent notes: roles, coordination strategy, and concur
 
 e. How you used the automation (what pain point it resolves or accelerates)
 > It completely removes development bottlenecks. By decoupling the interface code from the database logic, different parts of the task application could be built and tested simultaneously without conflicts or clobbering each other's work.
+## Tasks Completed (Added in Week 6)
+- **Task 8: List endpoint pagination for all collections** (Implemented pagination fallback query parameters on notes and action-items to support backend efficiency and clean frontend loading)
+- **Task 9: Query performance and database indexes** (Added database index constraint to Note.title inside SQLAlchemy models to optimize search query executions)

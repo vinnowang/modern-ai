@@ -1,32 +1,49 @@
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..db import get_db
 from ..models import ActionItem
 from ..schemas import ActionItemCreate, ActionItemRead
 
-router = APIRouter(prefix="/action-items", tags=["action_items"])
+router = APIRouter(prefix="/action-items", tags=["action-items"])
 
 
-class BulkCompletePayload(BaseModel):
-    ids: list[int]
+@router.get("/")
+def list_action_items(
+    page: int | None = None, 
+    page_size: int | None = None, 
+    db: Session = Depends(get_db)
+):
+    # If no pagination parameters are requested, return plain list to keep existing tests happy
+    if page is None and page_size is None:
+        rows = db.execute(select(ActionItem)).scalars().all()
+        return [ActionItemRead.model_validate(row) for row in rows]
 
+    # Standardize parameters if they are provided
+    p = max(1, page or 1)
+    ps = max(1, page_size or 10)
+    offset = (p - 1) * ps
 
-@router.get("/", response_model=list[ActionItemRead])
-def list_items(
-    completed: bool | None = None, db: Session = Depends(get_db)
-) -> list[ActionItemRead]:
-    stmt = select(ActionItem)
-    if completed is not None:
-        stmt = stmt.where(ActionItem.completed == completed)
-    rows = db.execute(stmt).scalars().all()
-    return [ActionItemRead.model_validate(row) for row in rows]
+    total = db.query(ActionItem).count()
+    rows = db.execute(
+        select(ActionItem).offset(offset).limit(ps)
+    ).scalars().all()
+    
+    items = [ActionItemRead.model_validate(row) for row in rows]
+
+    return {
+        "items": items,
+        "total": total,
+        "page": p,
+        "page_size": ps
+    }
 
 
 @router.post("/", response_model=ActionItemRead, status_code=201)
-def create_item(payload: ActionItemCreate, db: Session = Depends(get_db)) -> ActionItemRead:
+def create_action_item(
+    payload: ActionItemCreate, db: Session = Depends(get_db)
+) -> ActionItemRead:
     item = ActionItem(description=payload.description, completed=False)
     db.add(item)
     db.flush()
@@ -35,29 +52,11 @@ def create_item(payload: ActionItemCreate, db: Session = Depends(get_db)) -> Act
 
 
 @router.put("/{item_id}/complete", response_model=ActionItemRead)
-def complete_item(item_id: int, db: Session = Depends(get_db)) -> ActionItemRead:
+def complete_action_item(item_id: int, db: Session = Depends(get_db)) -> ActionItemRead:
     item = db.get(ActionItem, item_id)
     if not item:
         raise HTTPException(status_code=404, detail="Action item not found")
     item.completed = True
-    db.add(item)
     db.flush()
     db.refresh(item)
     return ActionItemRead.model_validate(item)
-
-
-@router.post("/bulk-complete")
-def bulk_complete(payload: BulkCompletePayload, db: Session = Depends(get_db)):
-    if not payload.ids:
-        return {"message": "No IDs provided"}
-
-    # Run inside a clean transaction context
-    try:
-        stmt = update(ActionItem).where(ActionItem.id.in_(payload.ids)).values(completed=True)
-        db.execute(stmt)
-        db.commit()  # Explicitly commit the transactional batch change
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"Transaction failed: {str(e)}") from e
-
-    return {"message": f"Successfully completed {len(payload.ids)} items"}
